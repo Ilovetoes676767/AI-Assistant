@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Space Dodge</title>
+    <style>
+      :root {
+        --bg1: #090b1a;
+        --bg2: #121933;
+        --panel: rgba(15, 18, 34, 0.8);
+        --accent: #7cf7ff;
+        --accent-2: #ffb86c;
+        --danger: #ff5d73;
+        --text: #ebf3ff;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        font-family: Arial, Helvetica, sans-serif;
+        background: radial-gradient(circle at top, #1b2248, var(--bg1) 50%, #070912 100%);
+        color: var(--text);
+      }
+
+      .game-shell {
+        width: min(92vw, 760px);
+        background: var(--panel);
+        border: 1px solid rgba(124, 247, 255, 0.25);
+        border-radius: 20px;
+        box-shadow: 0 0 30px rgba(124, 247, 255, 0.12);
+        padding: 18px;
+      }
+
+      .hud {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .title {
+        font-size: clamp(1.2rem, 2vw, 1.8rem);
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .stats {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .pill {
+        background: rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.08);
+        padding: 8px 12px;
+        border-radius: 999px;
+        font-size: 0.9rem;
+      }
+
+      canvas {
+        display: block;
+        width: 100%;
+        height: auto;
+        border-radius: 16px;
+        background: linear-gradient(#08111f, #0f1e35 60%, #0a1428);
+        border: 1px solid rgba(124, 247, 255, 0.18);
+      }
+
+      .controls {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 14px;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      button {
+        border: none;
+        background: linear-gradient(135deg, var(--accent), #5dc9ff);
+        color: #04131b;
+        border-radius: 999px;
+        font-weight: 800;
+        padding: 12px 18px;
+        cursor: pointer;
+        min-width: 120px;
+        transition: transform 0.15s ease, filter 0.15s ease;
+      }
+
+      button:hover {
+        transform: translateY(-1px);
+        filter: brightness(1.05);
+      }
+
+      .tip {
+        color: rgba(235,243,255,0.72);
+        font-size: 0.92rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="game-shell">
+      <div class="hud">
+        <div class="title">Space Dodge</div>
+        <div class="stats">
+          <div class="pill">Score: <span id="score">0</span></div>
+          <div class="pill">Best: <span id="best">0</span></div>
+        </div>
+      </div>
+
+      <canvas id="gameCanvas" width="720" height="420" aria-label="Space Dodge game"></canvas>
+
+      <div class="controls">
+        <button id="startButton">Start Game</button>
+        <div class="tip">Use ← → or A / D to move, avoid the asteroids.</div>
+      </div>
+    </div>
+
+    <script>
+      const canvas = document.getElementById('gameCanvas');
+      const ctx = canvas.getContext('2d');
+      const scoreEl = document.getElementById('score');
+      const bestEl = document.getElementById('best');
+      const startButton = document.getElementById('startButton');
+
+      const bestKey = 'space-dodge-best';
+      let bestScore = Number(localStorage.getItem(bestKey) || 0);
+      bestEl.textContent = bestScore;
+
+      const state = {
+        running: false,
+        gameOver: false,
+        score: 0,
+        level: 1,
+        player: {
+          x: canvas.width / 2 - 28,
+          y: canvas.height - 48,
+          width: 56,
+          height: 22,
+          speed: 6,
+          moveLeft: false,
+          moveRight: false
+        },
+        meteors: [],
+        stars: [],
+        tick: 0
+      };
+
+      function resetGame() {
+        state.running = true;
+        state.gameOver = false;
+        state.score = 0;
+        state.level = 1;
+        state.tick = 0;
+        state.meteors = [];
+        state.stars = Array.from({ length: 70 }, () => ({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          radius: Math.random() * 2.2 + 0.8,
+          speed: Math.random() * 0.7 + 0.15
+        }));
+
+        state.player.x = canvas.width / 2 - state.player.width / 2;
+        state.player.y = canvas.height - 48;
+        scoreEl.textContent = '0';
+        startButton.textContent = 'Restart';
+      }
+
+      function endGame() {
+        state.running = false;
+        state.gameOver = true;
+
+        if (state.score > bestScore) {
+          bestScore = state.score;
+          localStorage.setItem(bestKey, String(bestScore));
+          bestEl.textContent = bestScore;
+        }
+      }
+
+      function spawnMeteor() {
+        const size = Math.random() * 14 + 16;
+        const x = Math.random() * (canvas.width - size);
+        const speed = Math.random() * 2.3 + 2 + state.level * 0.18;
+
+        state.meteors.push({
+          x,
+          y: -size,
+          size,
+          speed,
+          spin: Math.random() * Math.PI,
+          drift: (Math.random() - 0.5) * 1.5
+        });
+      }
+
+      function update() {
+        if (!state.running) return;
+
+        state.tick += 1;
+        state.level = 1 + Math.floor(state.score / 10);
+
+        if (state.tick % Math.max(18 - state.level, 10) === 0) {
+          spawnMeteor();
+        }
+
+        if (state.player.moveLeft) {
+          state.player.x -= state.player.speed;
+        }
+        if (state.player.moveRight) {
+          state.player.x += state.player.speed;
+        }
+
+        state.player.x = Math.max(0, Math.min(canvas.width - state.player.width, state.player.x));
+
+        for (const star of state.stars) {
+          star.y += star.speed;
+          if (star.y > canvas.height) {
+            star.y = -2;
+            star.x = Math.random() * canvas.width;
+          }
+        }
+
+        for (const meteor of state.meteors) {
+          meteor.y += meteor.speed;
+          meteor.x += meteor.drift;
+          meteor.spin += 0.08;
+
+          if (meteor.x < 0 || meteor.x + meteor.size > canvas.width) {
+            meteor.drift *= -1;
+          }
+
+          const withinX = meteor.x < state.player.x + state.player.width && meteor.x + meteor.size > state.player.x;
+          const withinY = meteor.y < state.player.y + state.player.height && meteor.y + meteor.size > state.player.y;
+
+          if (withinX && withinY) {
+            endGame();
+            return;
+          }
+        }
+
+        state.meteors = state.meteors.filter((meteor) => meteor.y < canvas.height + meteor.size);
+
+        state.score += 1;
+        scoreEl.textContent = state.score;
+      }
+
+      function drawBackground() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        gradient.addColorStop(0, '#071425');
+        gradient.addColorStop(0.6, '#0b1c30');
+        gradient.addColorStop(1, '#091827');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        for (const star of state.stars) {
+          ctx.beginPath();
+          ctx.fillStyle = 'rgba(255,255,255,0.85)';
+          ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        ctx.fillStyle = 'rgba(124, 247, 255, 0.12)';
+        for (let i = 0; i < 6; i++) {
+          ctx.fillRect((i * canvas.width / 6) + 30, canvas.height - 10, 18, 10);
+        }
+      }
+
+      function drawPlayer() {
+        const { x, y, width, height } = state.player;
+
+        ctx.save();
+        ctx.translate(x + width / 2, y + height / 2);
+
+        ctx.fillStyle = '#7cf7ff';
+        ctx.beginPath();
+        ctx.moveTo(0, -height / 2 - 8);
+        ctx.lineTo(width / 2, height / 2);
+        ctx.lineTo(0, height / 2 - 2);
+        ctx.lineTo(-width / 2, height / 2);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#ffb86c';
+        ctx.fillRect(-4, height / 2 - 2, 8, 8);
+        ctx.restore();
+      }
+
+      function drawMeteor(meteor) {
+        ctx.save();
+        ctx.translate(meteor.x + meteor.size / 2, meteor.y + meteor.size / 2);
+        ctx.rotate(meteor.spin);
+
+        ctx.fillStyle = '#8a9aa8';
+        ctx.beginPath();
+        ctx.moveTo(0, -meteor.size * 0.8);
+        ctx.lineTo(meteor.size * 0.7, -meteor.size * 0.2);
+        ctx.lineTo(meteor.size * 0.85, meteor.size * 0.7);
+        ctx.lineTo(0, meteor.size * 0.9);
+        ctx.lineTo(-meteor.size * 0.7, meteor.size * 0.2);
+        ctx.lineTo(-meteor.size * 0.8, -meteor.size * 0.7);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = 'rgba(255,255,255,0.18)';
+        ctx.beginPath();
+        ctx.arc(-meteor.size * 0.2, -meteor.size * 0.2, meteor.size * 0.22, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+      }
+
+      function drawGameOver() {
+        if (!state.gameOver) return;
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 42px Arial';
+        ctx.fillText('Game Over', canvas.width / 2, canvas.height / 2 - 10);
+
+        ctx.font = '20px Arial';
+        ctx.fillStyle = '#7cf7ff';
+        ctx.fillText(`Score: ${state.score}`, canvas.width / 2, canvas.height / 2 + 28);
+        ctx.fillText('Press Start to play again', canvas.width / 2, canvas.height / 2 + 62);
+      }
+
+      function render() {
+        drawBackground();
+        for (const meteor of state.meteors) drawMeteor(meteor);
+        drawPlayer();
+        drawGameOver();
+      }
+
+      function gameLoop() {
+        update();
+        render();
+        requestAnimationFrame(gameLoop);
+      }
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'ArrowLeft' || event.key.toLowerCase() === 'a') {
+          state.player.moveLeft = true;
+        }
+        if (event.key === 'ArrowRight' || event.key.toLowerCase() === 'd') {
+          state.player.moveRight = true;
+        }
+      });
+
+      document.addEventListener('keyup', (event) => {
+        if (event.key === 'ArrowLeft' || event.key.toLowerCase() === 'a') {
+          state.player.moveLeft = false;
+        }
+        if (event.key === 'ArrowRight' || event.key.toLowerCase() === 'd') {
+          state.player.moveRight = false;
+        }
+      });
+
+      startButton.addEventListener('click', () => {
+        resetGame();
+      });
+
+      resetGame();
+      requestAnimationFrame(gameLoop);
+    </script>
+  </body>
+</html>
